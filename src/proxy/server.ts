@@ -3,6 +3,7 @@ import { buildQwenHeaders, buildQwenUrl, buildQwenModelsUrl, QWEN_MODELS_OAUTH, 
 import { buildUpstream } from "./upstream.ts";
 import { claudeChunkToOpenAI, newClaudeStreamState, translateClaudeNonStream } from "./claude-translator.ts";
 import { geminiChunkToOpenAI, newGeminiStreamState, translateGeminiNonStream } from "./gemini-translator.ts";
+import { codexChunkToOpenAI, newCodexStreamState, translateCodexNonStream } from "./codex-translator.ts";
 import { getSetting } from "../db/index.ts";
 import { CURRENT_VERSION, fetchAndCacheVersion } from "../update/checker.ts";
 import { selectAccount, markAccountUnavailable, clearAccountError } from "../rotator/index.ts";
@@ -565,9 +566,10 @@ async function handleChatCompletions(req: Request, pinnedProvider?: string): Pro
       const dec = new TextDecoder();
       const enc = new TextEncoder();
       const fmt = dispatch.format;
-      const needsTranslation = fmt === "claude" || fmt === "gemini";
+      const needsTranslation = fmt === "claude" || fmt === "gemini" || fmt === "codex";
       const claudeState = fmt === "claude" ? newClaudeStreamState() : null;
       const geminiState = fmt === "gemini" ? newGeminiStreamState() : null;
+      const codexState = fmt === "codex" ? newCodexStreamState() : null;
       let tail = "";
       let lineBuf = "";
       const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>({
@@ -585,7 +587,9 @@ async function handleChatCompletions(req: Request, pinnedProvider?: string): Pro
               if (!trimmed) continue;
               const translated = claudeState
                 ? claudeChunkToOpenAI(trimmed, claudeState)
-                : geminiChunkToOpenAI(trimmed, geminiState!);
+                : geminiState
+                  ? geminiChunkToOpenAI(trimmed, geminiState)
+                  : codexChunkToOpenAI(trimmed, codexState!);
               for (const out of translated) {
                 ctrl.enqueue(enc.encode(out));
                 tail += out;
@@ -617,6 +621,7 @@ async function handleChatCompletions(req: Request, pinnedProvider?: string): Pro
     // Translate non-stream responses → OpenAI format
     if (dispatch.format === "claude") data = translateClaudeNonStream(data);
     else if (dispatch.format === "gemini") data = translateGeminiNonStream(data);
+    else if (dispatch.format === "codex") data = translateCodexNonStream(data);
 
     const rawUsage = data["usage"] as Record<string, number> | undefined;
     const promptTok     = rawUsage?.prompt_tokens     ?? 0;
